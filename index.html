@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<!-- App Version: 1.0.0 — see CHANGELOG.md for release history -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>What's Next? Task Picker</title>
+<meta name="description" content="A weighted random task picker with a spinning wheel, per-task timers, and a completion log.">
+<meta name="theme-color" content="#1B1F2A">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #1B1F2A;
+    min-height: 100vh;
+  }
+</style>
+</head>
+<body>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #1B1F2A;
+    --surface: #242938;
+    --surface-2: #2C3244;
+    --text: #F0EDE4;
+    --muted: #9AA0B4;
+    --amber: #E8A33D;
+    --amber-dark: #C7862A;
+    --green: #7FB77E;
+    --border: #363D52;
+  }
+
+  * { box-sizing: border-box; }
+
+  .picker-root {
+    font-family: 'Manrope', system-ui, sans-serif;
+    background: transparent;
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 8px;
+    position: relative;
+  }
+
+  .task-io-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .import-modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 12, 18, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .import-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    max-width: 320px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: center;
+  }
+
+  .import-modal-title { font-weight: 700; font-size: 1rem; }
+  .import-modal-desc { color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
+
+  .import-modal-actions { display: flex; flex-direction: column; gap: 8px; }
+  .import-modal-actions button {
+    font-family: inherit; font-weight: 600; font-size: 0.88rem;
+    border-radius: 10px; padding: 10px; cursor: pointer; border: 1px solid var(--border);
+  }
+  .import-modal-actions .modal-replace { background: var(--amber); color: #1B1F2A; border-color: var(--amber); }
+  .import-modal-actions .modal-merge { background: var(--surface-2); color: var(--text); }
+  .import-modal-actions .modal-cancel { background: none; color: var(--muted); }
+
+  .picker-card {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .picker-heading { text-align: center; }
+  .picker-heading h1 { font-size: 1.4rem; font-weight: 800; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .picker-heading p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  /* ---- Wheel ---- */
+  .wheel-area { position: relative; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+
+  .wheel-pointer {
+    width: 0; height: 0;
+    border-left: 14px solid transparent;
+    border-right: 14px solid transparent;
+    border-top: 22px solid var(--amber);
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,0.4));
+    z-index: 2; margin-bottom: -6px;
+  }
+
+  .wheel-wrap { position: relative; width: 280px; height: 280px; }
+
+  .wheel-svg {
+    width: 100%; height: 100%;
+    transition: transform 4.2s cubic-bezier(0.17, 0.67, 0.12, 0.99);
+    filter: drop-shadow(0 6px 18px rgba(0,0,0,0.45));
+  }
+
+  .wheel-hub {
+    position: absolute; top: 50%; left: 50%;
+    width: 44px; height: 44px;
+    background: var(--surface); border: 3px solid var(--amber);
+    border-radius: 50%; transform: translate(-50%, -50%); z-index: 3;
+  }
+
+  .empty-wheel {
+    width: 280px; height: 280px; border-radius: 50%;
+    border: 2px dashed var(--border);
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; color: var(--muted); font-size: 0.85rem; padding: 30px;
+  }
+
+  .spin-btn {
+    background: var(--amber); color: #1B1F2A; border: none;
+    font-family: inherit; font-weight: 700; font-size: 0.95rem;
+    padding: 12px 32px; border-radius: 999px; cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  .spin-btn:hover:not(:disabled) { background: #F0B457; }
+  .spin-btn:active:not(:disabled) { transform: scale(0.97); }
+  .spin-btn:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
+
+  /* ---- Current task / timer ---- */
+  .current-task-card {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .current-task-label { color: var(--muted); font-size: 0.78rem; }
+  .current-task-name { font-size: 1.15rem; font-weight: 700; text-align: center; }
+
+  .timer-display {
+    font-size: 2.4rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+  .timer-display.timer-done { color: var(--amber); }
+
+  .timer-controls, .current-task-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .timer-controls button, .current-task-actions button {
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 8px 16px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .timer-controls button:hover, .current-task-actions button:hover { border-color: var(--amber); }
+  .timer-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .complete-btn { background: var(--green) !important; color: #1B1F2A !important; border-color: var(--green) !important; }
+  .complete-btn:hover { background: #8fc98e !important; }
+
+  /* ---- Task manager ---- */
+  .task-section h2 { font-size: 0.95rem; font-weight: 700; margin: 0 0 12px; color: var(--text); }
+
+  .add-task-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .add-task-row input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 10px; padding: 10px 12px;
+    font-family: inherit; font-size: 0.9rem;
+  }
+  .add-task-row input:focus { outline: none; border-color: var(--amber); }
+  .add-task-row button {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0 16px; font-family: inherit; font-weight: 600; cursor: pointer;
+  }
+  .add-task-row button:hover { border-color: var(--amber); }
+
+  .task-list { display: flex; flex-direction: column; gap: 10px; }
+
+  .task-row {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 10px 14px;
+    display: flex; align-items: flex-start; gap: 12px;
+  }
+
+  .task-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+
+  .task-drag-handle {
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1;
+    padding: 4px 2px;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+  }
+  .task-drag-handle:active { cursor: grabbing; }
+
+  .task-row.dragging { opacity: 0.4; }
+  .task-row.drag-over { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+
+  .task-row-main { flex: 1; min-width: 0; }
+
+  .task-name {
+    font-size: 0.9rem; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .task-weight-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .task-weight-row input[type="range"] { flex: 1; accent-color: var(--amber); }
+  .task-weight-value { font-size: 0.78rem; color: var(--muted); width: 20px; text-align: right; }
+
+  .task-duration-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .task-duration-row label { font-size: 0.78rem; color: var(--muted); }
+  .task-duration-row input[type="number"] {
+    width: 52px; background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 3px 6px; font-family: inherit; font-size: 0.8rem;
+  }
+  .task-duration-row span { font-size: 0.78rem; color: var(--muted); }
+
+  .task-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 4px; }
+  .task-remove:hover { color: #E2775C; }
+
+  .empty-tasks { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 20px 0; }
+
+  .save-note { text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: -6px; }
+
+  /* ---- Completed ---- */
+  .completed-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .completed-header h2 { margin: 0; }
+  .completed-header button {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 999px; padding: 6px 14px; font-family: inherit; font-size: 0.78rem; cursor: pointer;
+  }
+  .completed-header button:hover { border-color: #E2775C; color: #E2775C; }
+
+  .completed-list { display: flex; flex-direction: column; gap: 8px; }
+  .completed-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 9px 14px;
+  }
+  .completed-row .completed-name { font-size: 0.85rem; }
+  .completed-row .completed-time { font-size: 0.75rem; color: var(--muted); }
+
+  .empty-completed { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 16px 0; }
+
+  .app-version {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.7rem;
+    opacity: 0.6;
+    margin-top: 4px;
+  }
+</style>
+
+<div class="picker-root">
+  <div class="picker-card">
+    <div class="picker-heading">
+      <h1>What's next?</h1>
+      <p>Add your tasks, set how likely each one is, then spin.</p>
+    </div>
+
+    <div class="wheel-area">
+      <div class="wheel-pointer"></div>
+      <div id="wheelContainer"></div>
+      <button class="spin-btn" id="spinBtn">Spin</button>
+
+      <div class="current-task-card" id="currentTaskCard" style="display:none">
+        <div class="current-task-label">Up next</div>
+        <div class="current-task-name" id="currentTaskName"></div>
+        <div class="timer-display" id="timerDisplay">00:00</div>
+        <div class="timer-controls">
+          <button id="timerStartBtn">Start</button>
+          <button id="timerPauseBtn">Pause</button>
+          <button id="timerResetBtn">Reset</button>
+        </div>
+        <div class="current-task-actions">
+          <button class="complete-btn" id="completeBtn">Complete</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="task-section">
+      <div class="completed-header">
+        <h2>Your tasks</h2>
+        <div class="task-io-actions">
+          <button id="resetWeightsBtn">Reset weights</button>
+          <button id="exportBtn">Export</button>
+          <button id="importBtn">Import</button>
+        </div>
+      </div>
+      <input type="file" id="importFileInput" accept="application/json,.json" style="display:none" />
+      <div class="add-task-row">
+        <input type="text" id="newTaskInput" placeholder="Add a task..." maxlength="60" />
+        <button id="addTaskBtn">Add</button>
+      </div>
+      <div class="task-list" id="taskList"></div>
+      <div class="save-note" id="saveNote"></div>
+    </div>
+
+    <div class="task-section">
+      <div class="completed-header">
+        <h2>Completed</h2>
+        <button id="clearCompletedBtn">Clear history</button>
+      </div>
+      <div class="completed-list" id="completedList"></div>
+      <div class="app-version" id="appVersion"></div>
+    </div>
+  </div>
+
+  <div class="import-modal-overlay" id="importModalOverlay" style="display:none">
+    <div class="import-modal">
+      <div class="import-modal-title">You already have tasks loaded</div>
+      <div class="import-modal-desc">How would you like to add the uploaded list?</div>
+      <div class="import-modal-actions">
+        <button class="modal-replace" id="importReplaceBtn">Replace current list</button>
+        <button class="modal-merge" id="importMergeBtn">Add to current list</button>
+        <button class="modal-cancel" id="importCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Storage shim: provides the same get/set/delete/list interface the app already uses,
+  // backed by the browser's own localStorage, so it works as a normal standalone website.
+  if (!window.storage) {
+    window.storage = {
+      get: async (key) => {
+        const v = localStorage.getItem(key);
+        return v === null ? null : { key, value: v, shared: false };
+      },
+      set: async (key, value) => {
+        localStorage.setItem(key, value);
+        return { key, value, shared: false };
+      },
+      delete: async (key) => {
+        localStorage.removeItem(key);
+        return { key, deleted: true, shared: false };
+      },
+      list: async (prefix) => {
+        const keys = Object.keys(localStorage).filter((k) => !prefix || k.startsWith(prefix));
+        return { keys, prefix, shared: false };
+      }
+    };
+  }
+</script>
+<script>
+(function () {
+  const STORAGE_KEY = 'task-picker-tasks';
+  const COMPLETED_KEY = 'task-picker-completed';
+  const PALETTE = ['#E8A33D', '#4FA9A8', '#D97C86', '#8FB996', '#7C8FE0', '#E2775C', '#D4B65E', '#9B7BB8'];
+  const DEFAULT_DURATION = 25;
+  const DEFAULT_WEIGHT = 5;
+  // Single source of truth for the app version. Bump this on every release,
+  // and mirror the same number in manifest.json and CHANGELOG.md.
+  const APP_VERSION = '1.0.0';
+  const DEFAULT_TITLE = document.title || "What's next?";
+
+  let tasks = [];
+  let completed = [];
+  let rotation = 0;
+  let spinning = false;
+
+  let currentTask = null;
+  let remainingSeconds = 0;
+  let timerRunning = false;
+  let timerInterval = null;
+  let timerEndTimestamp = null;
+  let alarmInterval = null;
+  let audioCtx = null;
+  let wakeLock = null;
+
+  const wheelContainer = document.getElementById('wheelContainer');
+  const spinBtn = document.getElementById('spinBtn');
+  const taskList = document.getElementById('taskList');
+  const newTaskInput = document.getElementById('newTaskInput');
+  const addTaskBtn = document.getElementById('addTaskBtn');
+  const saveNote = document.getElementById('saveNote');
+
+  const currentTaskCard = document.getElementById('currentTaskCard');
+  const currentTaskName = document.getElementById('currentTaskName');
+  const timerDisplay = document.getElementById('timerDisplay');
+  const timerStartBtn = document.getElementById('timerStartBtn');
+  const timerPauseBtn = document.getElementById('timerPauseBtn');
+  const timerResetBtn = document.getElementById('timerResetBtn');
+  const completeBtn = document.getElementById('completeBtn');
+  const clearBtn = document.getElementById('clearBtn');
+
+  const completedList = document.getElementById('completedList');
+  const clearCompletedBtn = document.getElementById('clearCompletedBtn');
+
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const resetWeightsBtn = document.getElementById('resetWeightsBtn');
+  const importFileInput = document.getElementById('importFileInput');
+  const importModalOverlay = document.getElementById('importModalOverlay');
+  const importReplaceBtn = document.getElementById('importReplaceBtn');
+  const importMergeBtn = document.getElementById('importMergeBtn');
+  const importCancelBtn = document.getElementById('importCancelBtn');
+
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  async function loadTasks() {
+    try {
+      const res = await window.storage.get(STORAGE_KEY, false);
+      tasks = res ? JSON.parse(res.value) : [];
+    } catch (e) {
+      tasks = [];
+    }
+    if (!Array.isArray(tasks)) tasks = [];
+    tasks.forEach((t) => {
+      if (!t.duration) t.duration = DEFAULT_DURATION;
+      if (typeof t.baseWeight !== 'number') t.baseWeight = t.weight;
+    });
+    renderTaskList();
+    renderWheel();
+  }
+
+  async function loadCompleted() {
+    try {
+      const res = await window.storage.get(COMPLETED_KEY, false);
+      completed = res ? JSON.parse(res.value) : [];
+    } catch (e) {
+      completed = [];
+    }
+    if (!Array.isArray(completed)) completed = [];
+    renderCompleted();
+  }
+
+  async function persistTasks() {
+    try {
+      const ok = await window.storage.set(STORAGE_KEY, JSON.stringify(tasks), false);
+      saveNote.textContent = ok ? '' : "Couldn't save — changes may not persist.";
+    } catch (e) {
+      saveNote.textContent = "Couldn't save — changes may not persist.";
+    }
+  }
+
+  async function persistCompleted() {
+    try {
+      await window.storage.set(COMPLETED_KEY, JSON.stringify(completed), false);
+    } catch (e) {
+      // non-critical
+    }
+  }
+
+  function polar(cx, cy, r, angleDeg) {
+    const rad = (angleDeg * Math.PI) / 180;
+    return { x: cx + r * Math.sin(rad), y: cy - r * Math.cos(rad) };
+  }
+
+  function renderWheel() {
+    if (tasks.length === 0) {
+      wheelContainer.innerHTML = '<div class="empty-wheel">Add a task below to build your wheel</div>';
+      spinBtn.disabled = true;
+      return;
+    }
+    spinBtn.disabled = spinning;
+
+    const size = 280;
+    const cx = size / 2, cy = size / 2, r = size / 2 - 4;
+    const totalWeight = tasks.reduce((s, t) => s + t.weight, 0) || 1;
+
+    let angle = 0;
+    let slices = '';
+    let labels = '';
+
+    tasks.forEach((t, i) => {
+      const sweep = (t.weight / totalWeight) * 360;
+      const start = angle;
+      const end = angle + sweep;
+      const color = PALETTE[i % PALETTE.length];
+
+      const p1 = polar(cx, cy, r, start);
+      const p2 = polar(cx, cy, r, end);
+      const largeArc = sweep > 180 ? 1 : 0;
+
+      slices += `<path d="M ${cx} ${cy} L ${p1.x.toFixed(2)} ${p1.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${p2.x.toFixed(2)} ${p2.y.toFixed(2)} Z" fill="${color}" stroke="#1B1F2A" stroke-width="1.5"><title>${escapeHtml(t.name)}</title></path>`;
+
+      const mid = start + sweep / 2;
+      const labelR = r * 0.62;
+      const lp = polar(cx, cy, labelR, mid);
+      const textRotation = mid <= 180 ? mid - 90 : mid + 90;
+      const short = t.name.length > 16 ? t.name.slice(0, 15) + '…' : t.name;
+
+      labels += `<text x="${lp.x.toFixed(2)}" y="${lp.y.toFixed(2)}" transform="rotate(${textRotation.toFixed(2)} ${lp.x.toFixed(2)} ${lp.y.toFixed(2)})" text-anchor="middle" dominant-baseline="middle" fill="#1B1F2A" font-size="11" font-weight="700" font-family="Manrope, sans-serif">${escapeHtml(short)}</text>`;
+
+      angle = end;
+    });
+
+    wheelContainer.innerHTML = `
+      <div class="wheel-wrap">
+        <svg class="wheel-svg" id="wheelSvg" viewBox="0 0 ${size} ${size}" style="transform: rotate(${rotation}deg)">
+          ${slices}
+          ${labels}
+        </svg>
+        <div class="wheel-hub"></div>
+      </div>
+    `;
+  }
+
+  function renderTaskList() {
+    if (tasks.length === 0) {
+      taskList.innerHTML = '<div class="empty-tasks">No tasks yet. Add your first one above.</div>';
+      return;
+    }
+    taskList.innerHTML = tasks.map((t, i) => `
+      <div class="task-row" data-id="${t.id}">
+        <div class="task-drag-handle" draggable="true" data-id="${t.id}" title="Drag to reorder">⋮⋮</div>
+        <div class="task-swatch" style="background:${PALETTE[i % PALETTE.length]}"></div>
+        <div class="task-row-main">
+          <div class="task-name">${escapeHtml(t.name)}</div>
+          <div class="task-weight-row">
+            <input type="range" min="1" max="10" value="${t.weight}" data-action="weight" data-id="${t.id}" />
+            <div class="task-weight-value">${t.weight}</div>
+          </div>
+          <div class="task-duration-row">
+            <label>Timer</label>
+            <input type="number" min="1" max="180" value="${t.duration}" data-action="duration" data-id="${t.id}" />
+            <span>min</span>
+          </div>
+        </div>
+        <button class="task-remove" data-action="remove" data-id="${t.id}" title="Remove task">✕</button>
+      </div>
+    `).join('');
+  }
+
+  function reorderTasks(draggedId, targetId) {
+    if (draggedId === targetId) return;
+    const fromIndex = tasks.findIndex((t) => t.id === draggedId);
+    const toIndex = tasks.findIndex((t) => t.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    const [item] = tasks.splice(fromIndex, 1);
+    tasks.splice(toIndex, 0, item);
+    renderTaskList();
+    renderWheel();
+    persistTasks();
+  }
+
+  function renderCompleted() {
+    if (completed.length === 0) {
+      completedList.innerHTML = '<div class="empty-completed">Nothing completed yet.</div>';
+      return;
+    }
+    completedList.innerHTML = completed.map((c) => {
+      const time = new Date(c.completedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      return `
+        <div class="completed-row">
+          <div class="completed-name">${escapeHtml(c.name)}</div>
+          <div class="completed-time">${time}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function pickWeighted() {
+    const total = tasks.reduce((s, t) => s + t.weight, 0);
+    let r = Math.random() * total;
+    let angle = 0;
+    for (const t of tasks) {
+      const sweep = (t.weight / total) * 360;
+      if (r < t.weight) {
+        return { task: t, start: angle, end: angle + sweep };
+      }
+      r -= t.weight;
+      angle += sweep;
+    }
+    const last = tasks[tasks.length - 1];
+    return { task: last, start: angle - (last.weight / total) * 360, end: angle };
+  }
+
+  function spin() {
+    if (spinning || tasks.length === 0) return;
+    stopTimer();
+    stopAlarm();
+    spinning = true;
+    spinBtn.disabled = true;
+    currentTaskCard.style.display = 'none';
+
+    const { task, start, end } = pickWeighted();
+    const margin = Math.min(4, (end - start) * 0.15);
+    const targetAngle = start + margin + Math.random() * Math.max(0.1, (end - start) - margin * 2);
+
+    const currentMod = ((rotation % 360) + 360) % 360;
+    const spins = 5 + Math.floor(Math.random() * 3);
+    const desiredMod = (360 - targetAngle) % 360;
+    const delta = ((desiredMod - currentMod) + 360) % 360;
+    rotation = rotation + spins * 360 + delta;
+
+    const svg = document.getElementById('wheelSvg');
+    svg.style.transform = `rotate(${rotation}deg)`;
+
+    const onEnd = () => {
+      svg.removeEventListener('transitionend', onEnd);
+      spinning = false;
+      spinBtn.disabled = false;
+      selectTask(task);
+    };
+    svg.addEventListener('transitionend', onEnd);
+  }
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audioCtx = new Ctx();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+
+  function playTone(ctx, startTime, freq, duration) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.9, startTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(startTime);
+    osc.stop(startTime + duration + 0.02);
+  }
+
+  function playBeep() {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    playTone(ctx, now, 1046, 0.18);
+    playTone(ctx, now + 0.22, 1046, 0.18);
+    playTone(ctx, now + 0.44, 1046, 0.18);
+  }
+
+  function startAlarm() {
+    stopAlarm();
+    playBeep();
+    alarmInterval = setInterval(playBeep, 60000);
+  }
+
+  function stopAlarm() {
+    if (alarmInterval) clearInterval(alarmInterval);
+    alarmInterval = null;
+  }
+
+  function formatTime(totalSeconds) {
+    const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+    const s = Math.floor(totalSeconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  function updateTabTitle() {
+    if (!currentTask) {
+      document.title = DEFAULT_TITLE;
+      return;
+    }
+    const timeLabel = remainingSeconds <= 0 ? "Time's up" : formatTime(remainingSeconds);
+    document.title = `${timeLabel} · ${currentTask.name}`;
+  }
+
+  function selectTask(task) {
+    stopAlarm();
+    currentTask = task;
+    remainingSeconds = (task.duration || DEFAULT_DURATION) * 60;
+    timerRunning = false;
+    timerDisplay.classList.remove('timer-done');
+    currentTaskName.textContent = task.name;
+    timerDisplay.textContent = formatTime(remainingSeconds);
+    currentTaskCard.style.display = 'flex';
+    updateTimerButtons();
+    updateTabTitle();
+  }
+
+  function updateTimerButtons() {
+    timerStartBtn.disabled = timerRunning || !currentTask;
+    timerPauseBtn.disabled = !timerRunning;
+  }
+
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch (e) {
+      wakeLock = null;
+    }
+  }
+
+  function releaseWakeLock() {
+    if (wakeLock) {
+      wakeLock.release().catch(() => {});
+      wakeLock = null;
+    }
+  }
+
+  function tickTimer() {
+    if (!timerRunning || !timerEndTimestamp) return;
+    const secsLeft = Math.max(0, Math.round((timerEndTimestamp - Date.now()) / 1000));
+    remainingSeconds = secsLeft;
+    if (secsLeft <= 0) {
+      remainingSeconds = 0;
+      timerDisplay.textContent = "Time's up!";
+      timerDisplay.classList.add('timer-done');
+      stopTimer();
+      startAlarm();
+      updateTabTitle();
+      return;
+    }
+    timerDisplay.textContent = formatTime(remainingSeconds);
+    updateTabTitle();
+  }
+
+  function startTimer() {
+    if (!currentTask || timerRunning) return;
+    getAudioCtx();
+    requestWakeLock();
+    timerRunning = true;
+    timerEndTimestamp = Date.now() + remainingSeconds * 1000;
+    updateTimerButtons();
+    timerInterval = setInterval(tickTimer, 1000);
+  }
+
+  function stopTimer() {
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = null;
+    timerRunning = false;
+    timerEndTimestamp = null;
+    releaseWakeLock();
+    updateTimerButtons();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (timerRunning) {
+        tickTimer();
+        requestWakeLock();
+      }
+    }
+  });
+
+  function resetTimer() {
+    stopTimer();
+    stopAlarm();
+    if (!currentTask) return;
+    remainingSeconds = (currentTask.duration || DEFAULT_DURATION) * 60;
+    timerDisplay.classList.remove('timer-done');
+    timerDisplay.textContent = formatTime(remainingSeconds);
+    updateTabTitle();
+  }
+
+  function completeCurrentTask() {
+    if (!currentTask) return;
+    completed.unshift({ id: uid(), name: currentTask.name, completedAt: Date.now() });
+    persistCompleted();
+    renderCompleted();
+
+    if (currentTask.weight > 1) {
+      currentTask.weight -= 1;
+      renderTaskList();
+      renderWheel();
+      persistTasks();
+    }
+
+    clearSelection();
+  }
+
+  function clearSelection() {
+    stopTimer();
+    stopAlarm();
+    currentTask = null;
+    currentTaskCard.style.display = 'none';
+    updateTabTitle();
+  }
+
+  function addTask() {
+    const name = newTaskInput.value.trim();
+    if (!name) return;
+    tasks.push({ id: uid(), name, weight: DEFAULT_WEIGHT, baseWeight: DEFAULT_WEIGHT, duration: DEFAULT_DURATION });
+    newTaskInput.value = '';
+    renderTaskList();
+    renderWheel();
+    persistTasks();
+  }
+
+  addTaskBtn.addEventListener('click', addTask);
+  newTaskInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addTask(); });
+
+  taskList.addEventListener('click', (e) => {
+    const removeBtn = e.target.closest('[data-action="remove"]');
+    if (!removeBtn) return;
+    const id = removeBtn.dataset.id;
+    if (currentTask && currentTask.id === id) clearSelection();
+    tasks = tasks.filter((t) => t.id !== id);
+    renderTaskList();
+    renderWheel();
+    persistTasks();
+  });
+
+  let draggedId = null;
+
+  taskList.addEventListener('dragstart', (e) => {
+    const handle = e.target.closest('.task-drag-handle');
+    if (!handle) { e.preventDefault(); return; }
+    draggedId = handle.dataset.id;
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', draggedId); } catch (err) {}
+    const row = handle.closest('.task-row');
+    if (row) row.classList.add('dragging');
+  });
+
+  taskList.addEventListener('dragend', (e) => {
+    taskList.querySelectorAll('.task-row').forEach((r) => r.classList.remove('dragging', 'drag-over'));
+    draggedId = null;
+  });
+
+  taskList.addEventListener('dragover', (e) => {
+    if (!draggedId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const row = e.target.closest('.task-row');
+    if (!row) return;
+    taskList.querySelectorAll('.task-row').forEach((r) => { if (r !== row) r.classList.remove('drag-over'); });
+    if (row.dataset.id !== draggedId) row.classList.add('drag-over');
+  });
+
+  taskList.addEventListener('dragleave', (e) => {
+    const row = e.target.closest('.task-row');
+    if (row) row.classList.remove('drag-over');
+  });
+
+  taskList.addEventListener('drop', (e) => {
+    if (!draggedId) return;
+    e.preventDefault();
+    const row = e.target.closest('.task-row');
+    if (row && row.dataset.id !== draggedId) {
+      reorderTasks(draggedId, row.dataset.id);
+    }
+    taskList.querySelectorAll('.task-row').forEach((r) => r.classList.remove('dragging', 'drag-over'));
+    draggedId = null;
+  });
+
+  taskList.addEventListener('input', (e) => {
+    const weightEl = e.target.closest('[data-action="weight"]');
+    if (weightEl) {
+      const t = tasks.find((t) => t.id === weightEl.dataset.id);
+      if (t) {
+        t.weight = parseInt(weightEl.value, 10);
+        t.baseWeight = t.weight;
+        const valueEl = weightEl.parentElement.querySelector('.task-weight-value');
+        if (valueEl) valueEl.textContent = t.weight;
+        renderWheel();
+      }
+      return;
+    }
+    const durationEl = e.target.closest('[data-action="duration"]');
+    if (durationEl) {
+      const t = tasks.find((t) => t.id === durationEl.dataset.id);
+      if (t) {
+        const val = parseInt(durationEl.value, 10);
+        t.duration = isNaN(val) || val < 1 ? 1 : val;
+      }
+    }
+  });
+
+  taskList.addEventListener('change', (e) => {
+    const el = e.target.closest('[data-action="weight"], [data-action="duration"]');
+    if (!el) return;
+    persistTasks();
+  });
+
+  spinBtn.addEventListener('click', spin);
+  timerStartBtn.addEventListener('click', startTimer);
+  timerPauseBtn.addEventListener('click', stopTimer);
+  timerResetBtn.addEventListener('click', resetTimer);
+  completeBtn.addEventListener('click', completeCurrentTask);
+  clearBtn.addEventListener('click', clearSelection);
+
+  clearCompletedBtn.addEventListener('click', () => {
+    if (completed.length === 0) return;
+    if (!window.confirm('Clear your completed tasks history?')) return;
+    completed = [];
+    persistCompleted();
+    renderCompleted();
+  });
+
+  // ---- Export / Import ----
+  let pendingImportTasks = null;
+
+  function exportTasks() {
+    const data = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      tasks: tasks.map((t) => ({ name: t.name, weight: t.weight, baseWeight: t.baseWeight, duration: t.duration }))
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `task-list-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function sanitizeImported(raw) {
+    const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.tasks) ? raw.tasks : null);
+    if (!list) return null;
+    const cleaned = [];
+    for (const item of list) {
+      if (!item || typeof item.name !== 'string' || !item.name.trim()) continue;
+      const name = item.name.trim().slice(0, 60);
+      let weight = parseInt(item.weight, 10);
+      if (isNaN(weight) || weight < 1) weight = 5;
+      if (weight > 10) weight = 10;
+      let baseWeight = parseInt(item.baseWeight, 10);
+      if (isNaN(baseWeight) || baseWeight < 1 || baseWeight > 10) baseWeight = weight;
+      let duration = parseInt(item.duration, 10);
+      if (isNaN(duration) || duration < 1) duration = DEFAULT_DURATION;
+      if (duration > 180) duration = 180;
+      cleaned.push({ id: uid(), name, weight, baseWeight, duration });
+    }
+    return cleaned;
+  }
+
+  function openImportModal() {
+    importModalOverlay.style.display = 'flex';
+  }
+
+  function closeImportModal() {
+    importModalOverlay.style.display = 'none';
+    pendingImportTasks = null;
+    importFileInput.value = '';
+  }
+
+  function applyImport(mode) {
+    if (!pendingImportTasks) return;
+    if (mode === 'replace') {
+      if (currentTask) clearSelection();
+      tasks = pendingImportTasks;
+    } else {
+      tasks = tasks.concat(pendingImportTasks);
+    }
+    renderTaskList();
+    renderWheel();
+    persistTasks();
+    saveNote.textContent = `Imported ${pendingImportTasks.length} task${pendingImportTasks.length === 1 ? '' : 's'}.`;
+    closeImportModal();
+  }
+
+  exportBtn.addEventListener('click', exportTasks);
+  importBtn.addEventListener('click', () => importFileInput.click());
+
+  resetWeightsBtn.addEventListener('click', () => {
+    if (tasks.length === 0) return;
+    if (!window.confirm('Reset every task\'s weight back to what you last set it to?')) return;
+    tasks.forEach((t) => { t.weight = t.baseWeight; });
+    renderTaskList();
+    renderWheel();
+    persistTasks();
+  });
+
+  importFileInput.addEventListener('change', () => {
+    const file = importFileInput.files && importFileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed;
+      try {
+        parsed = JSON.parse(reader.result);
+      } catch (e) {
+        saveNote.textContent = "That file isn't valid — couldn't read it as a task list.";
+        importFileInput.value = '';
+        return;
+      }
+      const cleaned = sanitizeImported(parsed);
+      if (!cleaned || cleaned.length === 0) {
+        saveNote.textContent = "No valid tasks found in that file.";
+        importFileInput.value = '';
+        return;
+      }
+      pendingImportTasks = cleaned;
+      if (tasks.length === 0) {
+        applyImport('replace');
+      } else {
+        openImportModal();
+      }
+    };
+    reader.onerror = () => {
+      saveNote.textContent = "Couldn't read that file.";
+      importFileInput.value = '';
+    };
+    reader.readAsText(file);
+  });
+
+  importReplaceBtn.addEventListener('click', () => applyImport('replace'));
+  importMergeBtn.addEventListener('click', () => applyImport('merge'));
+  importCancelBtn.addEventListener('click', closeImportModal);
+
+  loadTasks();
+  loadCompleted();
+  document.getElementById('appVersion').textContent = `v${APP_VERSION}`;
+})();
+</script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('service-worker.js').catch(() => {
+        // Non-critical: the app still works fully online without the service worker.
+      });
+    });
+  }
+</script>
+</body>
+</html>

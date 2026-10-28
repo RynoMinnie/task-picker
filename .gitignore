@@ -1,0 +1,8 @@
+# Development handover log — kept locally for the dev/agent workflow,
+# not published alongside the app.
+worklog.md
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
